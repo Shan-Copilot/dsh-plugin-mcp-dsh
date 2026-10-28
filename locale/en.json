@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH Sessions MCP",
+    "description": "Exposes DSH sessions over MCP for local clients: list, create, send, interrupt, wait, and read results."
+  }
+}

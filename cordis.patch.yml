@@ -1,0 +1,5 @@
+- insert:
+    - id: mcp-dsh
+      name: '@local/mcp-dsh'
+      config:
+        path: /mcp-dsh
