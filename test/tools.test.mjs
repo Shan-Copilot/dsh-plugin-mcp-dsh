@@ -27,7 +27,7 @@ function serviceStub(overrides = {}) {
   return { service, calls }
 }
 
-const config = { mode: 'full', defaultWaitMs: 25_000, maxWaitMs: 120_000 }
+const config = { mode: 'full', defaultWaitMs: 25_000, maxWaitMs: 600_000 }
 
 test('full mode exposes eleven tools', () => {
   const { service } = serviceStub()
@@ -66,6 +66,14 @@ test('read-only mode keeps only observation tools', () => {
       'dsh_session_wait',
     ],
   )
+})
+
+test('dsh_session_wait advertises the configured wait cap', () => {
+  const { service } = serviceStub()
+  const tools = createTools({ service, config, status: () => ({ ok: true }) })
+  const wait = tools.list().find((tool) => tool.name === 'dsh_session_wait')
+  assert.equal(wait.inputSchema.properties.timeoutMs.maximum, config.maxWaitMs)
+  assert.match(wait.inputSchema.properties.timeoutMs.description, /Defaults to 25000ms, capped at 600000ms/)
 })
 
 test('unknown tools return an isError result', async () => {

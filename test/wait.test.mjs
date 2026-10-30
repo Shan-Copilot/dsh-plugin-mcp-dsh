@@ -6,13 +6,13 @@ import { fakeCtx } from './helpers.mjs'
 
 const config = { defaultWaitMs: 100, maxWaitMs: 1000 }
 
-function build(events, { agent, values } = {}) {
+function build(events, { agent, values, config: override } = {}) {
   const agents = new Map()
   if (agent !== undefined) agents.set('s1', agent)
   const { ctx } = fakeCtx({ agents })
   const hub = createWaitHub({
     ctx,
-    config,
+    config: override ?? config,
     loadLog: async () => ({ events }),
     loadValues: async () => values ?? {},
   })
@@ -73,6 +73,32 @@ test('returns running plus timedOut when the deadline passes', async () => {
   assert.equal('running' in result, false)
 })
 
+test('an omitted timeoutMs falls back to defaultWaitMs', async () => {
+  const { hub } = build(
+    [{ seq: 11, type: 'turn/start', data: { turn: 2 } }],
+    { agent: runningAgent(), config: { defaultWaitMs: 60, maxWaitMs: 60_000 } },
+  )
+  const startedAt = Date.now()
+  const result = await hub.wait({ sessionId: 's1', sinceSeq: 11 })
+  const elapsed = Date.now() - startedAt
+  assert.equal(result.timedOut, true)
+  assert.ok(elapsed >= 50 && elapsed < 5_000, `waited ${elapsed}ms`)
+})
+
+test('a request above the cap is clamped to maxWaitMs', async () => {
+  const { hub } = build(
+    [{ seq: 11, type: 'turn/start', data: { turn: 2 } }],
+    { agent: runningAgent(), config: { defaultWaitMs: 10, maxWaitMs: 120 } },
+  )
+  const startedAt = Date.now()
+  const result = await hub.wait({ sessionId: 's1', sinceSeq: 11, timeoutMs: 60_000 })
+  const elapsed = Date.now() - startedAt
+  assert.equal(result.state, 'running')
+  assert.equal(result.timedOut, true)
+  assert.ok(elapsed < 5_000, `waited ${elapsed}ms, the cap was not applied`)
+  assert.ok(elapsed >= 100, `waited ${elapsed}ms, shorter than the cap`)
+})
+
 test('a cold session with an unclosed turn returns interrupted immediately', async () => {
   const { hub } = build([{ seq: 11, type: 'turn/start', data: { turn: 2 } }])
   const result = await hub.wait({ sessionId: 's1', sinceSeq: 11, timeoutMs: 1000 })
@@ -115,7 +141,8 @@ test('reports a pending user question as waiting_input', async () => {
   assert.equal(result.pendingQuestions, 1)
 })
 
-test('surfaces an approval prompt without answering it', async () => {  const { hub, ctx } = build(
+test('surfaces an approval prompt without answering it', async () => {
+  const { hub, ctx } = build(
     [{ seq: 11, type: 'turn/start', data: { turn: 2 } }],
     { agent: runningAgent() },
   )

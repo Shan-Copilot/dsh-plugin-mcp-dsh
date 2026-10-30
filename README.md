@@ -73,7 +73,7 @@ claude mcp add --transport http dsh-sessions http://127.0.0.1:3080/mcp-dsh \
 | `dsh_archive_session` | 归档会话，从侧栏移除（日志保留，UI 可恢复） |
 | `dsh_session_send_message` | 发消息；`queue` 排队，`steer` 插话；崩溃后的半开 turn 会在发送时自动修复 |
 | `dsh_session_interrupt_turn` | 停止当前 turn，保留已排队消息；没有活动 turn 时返回 `accepted:false` + `reason:"not-running"` |
-| `dsh_session_wait` | 等待 turn 结束 / 会话空闲（长轮询，25s 默认，超时带 `timedOut:true` 和游标返回） |
+| `dsh_session_wait` | 等待 turn 结束 / 会话空闲（长轮询，25s 默认、10min 上限，超时带 `timedOut:true` 和游标返回） |
 | `dsh_session_read_messages` | 读取消息与工具调用摘要（有界输出） |
 
 典型流程：
@@ -119,7 +119,7 @@ patch 里可直接改：
         auth: bearer          # none | bearer
         mode: full            # full | read-only
         defaultWaitMs: 25000
-        maxWaitMs: 120000
+        maxWaitMs: 600000
         maxKeys: 20
 ```
 
@@ -130,7 +130,7 @@ patch 里可直接改：
 | `token` | 空 | 高级用法：写死一个固定主凭据（不进入 `keys.json`）；YAML 里是明文，通常不要用 |
 | `mode` | `full` | `read-only` 只暴露查询类工具 |
 | `defaultWaitMs` | 25000 | `dsh_session_wait` 默认预算 |
-| `maxWaitMs` | 120000 | `dsh_session_wait` 上限 |
+| `maxWaitMs` | 600000 | `dsh_session_wait` 上限（10 分钟；默认预算可按需调大） |
 | `maxPromptChars` | 100000 | 单条消息上限 |
 | `maxReadChars` | 120000 | `dsh_session_read_messages` 输出上限 |
 | `maxKeys` | 20 | 最多 active API Key 数 |
