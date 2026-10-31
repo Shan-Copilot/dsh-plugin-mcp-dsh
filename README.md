@@ -73,8 +73,8 @@ claude mcp add --transport http dsh-sessions http://127.0.0.1:3080/mcp-dsh \
 | `dsh_archive_session` | 归档会话，从侧栏移除（日志保留，UI 可恢复） |
 | `dsh_session_send_message` | 发消息；`queue` 排队，`steer` 插话；崩溃后的半开 turn 会在发送时自动修复 |
 | `dsh_session_interrupt_turn` | 停止当前 turn，保留已排队消息；没有活动 turn 时返回 `accepted:false` + `reason:"not-running"` |
-| `dsh_session_wait` | 等待 turn 结束 / 会话空闲（长轮询，25s 默认、10min 上限，超时带 `timedOut:true` 和游标返回） |
-| `dsh_session_read_messages` | 读取消息与工具调用摘要（有界输出） |
+| `dsh_session_wait` | 等待 turn 结束 / 会话空闲（长轮询，240s 默认、240s 上限，超时带 `timedOut:true` 和游标返回；单次预算必须小于客户端请求超时） |
+| `dsh_session_read_messages` | 读取消息（有界输出）；默认不带工具调用，`includeToolCalls:true` 才返回摘要 |
 
 典型流程：
 
@@ -96,6 +96,12 @@ list_workspaces / list_presets
 - 返回 `idle`：没有活动 turn，也没有排队消息。
 - 冷会话 + 未闭合 turn（DSH 崩溃）：立即返回 `interrupted`，不会挂到超时；想继续就直接发消息，修复在内部发生。
 
+单次等待的物理上限不是 `maxWaitMs`，而是 `min(timeoutMs, 客户端请求超时)`：
+
+- Node 内置 fetch（undici）默认 **300s** 就会 abort（`headersTimeout` / `bodyTimeout`），即使客户端把工具超时调得更长。
+- DSH 自身的 MCP 桥接（`@deepseek-ai/dsh-mcp-client`）`toolCallTimeoutMs` 默认 **60s**。
+- 因此 `timeoutMs` 超过客户端超时不会让等待变长，只会被传输层掐断、拿不到 `timedOut` 结果；正确做法是单次 ≤240s（默认即 240s）并用返回的 `cursor` 续等。
+
 断线重连后：
 
 ```text
@@ -105,6 +111,8 @@ session_wait(sinceSeq: lastSeq)          -> 继续等或立即拿到终态
 ```
 
 游标语义是**排他下界**（只返回 `seq > sinceSeq`），所以重复调用不会重复消费同一条消息。
+
+`dsh_session_read_messages` 默认不返回 `toolCalls`，只返回 user / assistant 消息；需要工具调用摘要时显式传 `includeToolCalls: true`（按名称与状态汇总，最多 100 条）。
 
 ## 配置
 
@@ -118,8 +126,8 @@ patch 里可直接改：
         path: /mcp-dsh
         auth: bearer          # none | bearer
         mode: full            # full | read-only
-        defaultWaitMs: 25000
-        maxWaitMs: 600000
+        defaultWaitMs: 240000
+        maxWaitMs: 240000
         maxKeys: 20
 ```
 
@@ -129,8 +137,8 @@ patch 里可直接改：
 | `auth` | `bearer` | `none` 仅建议在确认 loopback 时使用；监听非 loopback 时会被强制改回 `bearer` |
 | `token` | 空 | 高级用法：写死一个固定主凭据（不进入 `keys.json`）；YAML 里是明文，通常不要用 |
 | `mode` | `full` | `read-only` 只暴露查询类工具 |
-| `defaultWaitMs` | 25000 | `dsh_session_wait` 默认预算 |
-| `maxWaitMs` | 600000 | `dsh_session_wait` 上限（10 分钟；默认预算可按需调大） |
+| `defaultWaitMs` | 240000 | `dsh_session_wait` 默认预算（240s，低于常见的 300s 传输超时） |
+| `maxWaitMs` | 240000 | `dsh_session_wait` 上限；硬上限 240000，必须小于客户端请求超时才有意义 |
 | `maxPromptChars` | 100000 | 单条消息上限 |
 | `maxReadChars` | 120000 | `dsh_session_read_messages` 输出上限 |
 | `maxKeys` | 20 | 最多 active API Key 数 |
@@ -158,13 +166,14 @@ patch 里可直接改：
 | 404 | MCP 路径必须是 `/mcp-dsh` 或 `/mcp-dsh/` |
 | `SESSION_NOT_FOUND` | 先 `dsh_list_sessions` 拿有效 id |
 | `dsh_session_wait` 一直 `running` | 去 DSH UI 看是否卡在审批；`timedOut:true` 时带同一 cursor 继续等 |
+| `dsh_session_wait` 在约 300s 处断连/报 fetch 错误 | 客户端请求超时先触发（undici 默认 300s）；把 `timeoutMs` 降到 240s 以内再续等 |
 | 工具没出现在客户端 | 客户端需支持 Streamable HTTP；先调 `tools/list` |
 | 插件没起来 | 看 `%DSH_HOME%\mcp-dsh\mcp-dsh.log` 与插件行的诊断 |
 
 ## 开发
 
 ```powershell
-node --test          # 52 个单元测试，不依赖 DSH
+node --test          # 59 个单元测试，不依赖 DSH
 $env:DSH_MCP_KEY = '<在插件页创建的 Key>'
 node scripts/smoke.mjs http://127.0.0.1:3080/mcp-dsh
 node scripts/smoke.mjs http://127.0.0.1:3080/mcp-dsh --full

@@ -37,7 +37,9 @@ const INSTRUCTIONS = [
   'DSH session bridge. Typical flow: dsh_list_workspaces / dsh_list_presets -> dsh_create_session',
   '-> dsh_session_send_message -> dsh_session_wait(until:"idle") -> dsh_session_read_messages.',
   'dsh_session_wait is a long poll: if it returns state running with timedOut true, call it again',
-  'with the returned cursor as sinceSeq. After reconnecting, call dsh_get_session, then',
+  'with the returned cursor as sinceSeq. Keep one wait below any timeout the caller puts on the',
+  'request (Node fetch/undici aborts after 300000ms); a larger timeoutMs is cut by that timeout,',
+  'not honoured here. After reconnecting, call dsh_get_session, then',
   'dsh_session_read_messages and dsh_session_wait with the last cursor.',
   'A session whose previous turn was interrupted (including a DSH crash) is reported as state',
   'interrupted. Sending a message repairs it internally; there is no resume tool.',
@@ -45,7 +47,7 @@ const INSTRUCTIONS = [
   'or waiting_input instead of answering them.',
 ].join(' ')
 
-function normalize(raw = {}) {
+export function normalize(raw = {}) {
   const route = typeof raw.path === 'string' && raw.path.trim().startsWith('/')
     ? raw.path.trim().replace(/\/+$/, '')
     : '/mcp-dsh'
@@ -53,13 +55,17 @@ function normalize(raw = {}) {
     if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
     return Math.min(Math.max(Math.trunc(value), min), max)
   }
+  // A single MCP request has to survive the caller's own transport timeout
+  // (undici/Node fetch abort after 300000ms, DSH's MCP bridge defaults to
+  // 60000ms), so the wait budget is bounded well below the smallest common one.
+  const maxWaitMs = number(raw.maxWaitMs, 240_000, 0, 240_000)
   return {
     path: route.length > 0 ? route : '/mcp-dsh',
     mode: raw.mode === 'read-only' ? 'read-only' : 'full',
     auth: raw.auth === 'none' ? 'none' : 'bearer',
     token: typeof raw.token === 'string' ? raw.token.trim() : '',
-    defaultWaitMs: number(raw.defaultWaitMs, 25_000, 0, 600_000),
-    maxWaitMs: number(raw.maxWaitMs, 600_000, 0, 600_000),
+    defaultWaitMs: Math.min(number(raw.defaultWaitMs, 240_000, 0, 240_000), maxWaitMs),
+    maxWaitMs,
     maxPromptChars: number(raw.maxPromptChars, 100_000, 1_000, 1_000_000),
     maxReadChars: number(raw.maxReadChars, 120_000, 1_000, 1_000_000),
     maxKeys: number(raw.maxKeys, 20, 1, 100),

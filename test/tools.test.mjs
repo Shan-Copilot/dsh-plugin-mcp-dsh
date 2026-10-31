@@ -27,7 +27,7 @@ function serviceStub(overrides = {}) {
   return { service, calls }
 }
 
-const config = { mode: 'full', defaultWaitMs: 25_000, maxWaitMs: 600_000 }
+const config = { mode: 'full', defaultWaitMs: 240_000, maxWaitMs: 240_000 }
 
 test('full mode exposes eleven tools', () => {
   const { service } = serviceStub()
@@ -73,7 +73,16 @@ test('dsh_session_wait advertises the configured wait cap', () => {
   const tools = createTools({ service, config, status: () => ({ ok: true }) })
   const wait = tools.list().find((tool) => tool.name === 'dsh_session_wait')
   assert.equal(wait.inputSchema.properties.timeoutMs.maximum, config.maxWaitMs)
-  assert.match(wait.inputSchema.properties.timeoutMs.description, /Defaults to 25000ms, capped at 600000ms/)
+  assert.match(wait.inputSchema.properties.timeoutMs.description, /Defaults to 240000ms, capped at 240000ms/)
+  assert.match(wait.inputSchema.properties.timeoutMs.description, /300000ms for undici\/Node fetch/)
+  assert.match(wait.description, /300000ms/)
+})
+
+test('dsh_session_read_messages omits tool calls by default', () => {
+  const { service } = serviceStub()
+  const tools = createTools({ service, config, status: () => ({ ok: true }) })
+  const read = tools.list().find((tool) => tool.name === 'dsh_session_read_messages')
+  assert.equal(read.inputSchema.properties.includeToolCalls.default, false)
 })
 
 test('unknown tools return an isError result', async () => {

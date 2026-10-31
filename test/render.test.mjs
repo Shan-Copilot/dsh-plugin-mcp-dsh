@@ -27,8 +27,13 @@ test('renders only events newer than sinceSeq', () => {
   assert.equal(result.truncated, false)
 })
 
-test('summarizes tool calls with their names and error state', () => {
+test('omits tool calls by default', () => {
   const result = renderMessages(events)
+  assert.equal(result.toolCalls, undefined)
+})
+
+test('summarizes tool calls with their names and error state when asked', () => {
+  const result = renderMessages(events, { includeToolCalls: true })
   assert.equal(result.toolCalls.length, 1)
   assert.equal(result.toolCalls[0].name, 'pwsh')
   assert.equal(result.toolCalls[0].isError, false)
